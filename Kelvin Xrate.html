@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Currency Converter (Editable Rates + Persistent Order)</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f9f9f9;
+      padding: 30px;
+    }
+
+    .container {
+      max-width: 500px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid #eee;
+      cursor: move;
+      gap: 8px;
+    }
+
+    .row:last-child {
+      border-bottom: none;
+    }
+
+    .flag {
+      width: 24px;
+      height: 18px;
+      object-fit: contain;
+    }
+
+    .code {
+      width: 45px;
+      font-weight: bold;
+    }
+
+    .amount-input, .rate-input {
+      font-size: 1em;
+      padding: 6px 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      text-align: right;
+    }
+
+    .amount-input {
+      flex-grow: 1;
+    }
+
+    .rate-input {
+      width: 70px;
+      background-color: #f0f0f0;
+      -moz-appearance: textfield;
+    }
+
+    .rate-input::-webkit-outer-spin-button,
+    .rate-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .drag-over {
+      border: 2px dashed #aaa;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container" id="currencyContainer"></div>
+
+  <script>
+    const DEFAULT_CURRENCIES = [
+      { code: "SGD", label: "SGD", flag: "sg" },
+      { code: "EUR", label: "EUR", flag: "eu" },
+      { code: "THB", label: "THB", flag: "th" },
+      { code: "JPY", label: "JPY", flag: "jp" },
+      { code: "HKD", label: "HKD", flag: "hk" },
+      { code: "CNY", label: "RMB", flag: "cn" },
+      { code: "USD", label: "USD", flag: "us" },
+      { code: "AUD", label: "AUD", flag: "au" },
+      { code: "NZD", label: "NZD", flag: "nz" },
+      { code: "TWD", label: "TWD", flag: "tw" }
+    ];
+
+    const DEFAULT_RATES = {
+      SGD: 1,
+      EUR: 0.68,
+      THB: 26.5,
+      JPY: 111,
+      HKD: 5.8,
+      CNY: 5.3,
+      USD: 0.74,
+      AUD: 1.01,
+      NZD: 1.08,
+      TWD: 23.3
+    };
+
+    let currencies = loadCurrencies();
+    let rates = loadRates();
+    let lastInputCurrency = null;
+    let lastInputValue = null;
+
+    function parseNumber(str) {
+      return parseFloat(str.replace(/,/g, '')) || 0;
+    }
+
+    function formatNumber(num) {
+      return Math.round(num).toLocaleString();
+    }
+
+    function convert(fromCurrency) {
+      const inputField = document.getElementById(`amount-${fromCurrency}`);
+      const rawValue = inputField.value.replace(/,/g, '');
+      const numericValue = parseFloat(rawValue);
+      if (!numericValue || !rates[fromCurrency]) return;
+
+      inputField.value = formatNumber(numericValue);
+
+      lastInputCurrency = fromCurrency;
+      lastInputValue = numericValue;
+
+      const valueInSGD = numericValue / rates[fromCurrency];
+
+      currencies.forEach(currency => {
+        const code = currency.code;
+        const target = document.getElementById(`amount-${code}`);
+        if (code !== fromCurrency && target) {
+          const converted = valueInSGD * rates[code];
+          target.value = formatNumber(converted);
+        }
+      });
+    }
+
+    function updateRate(code, value) {
+      const num = parseFloat(value);
+      if (!num) return;
+      rates[code] = num;
+      saveRates();
+
+      if (lastInputCurrency && lastInputValue !== null) {
+        convert(lastInputCurrency);
+      }
+    }
+
+    function createRow(currency) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.draggable = true;
+      row.dataset.code = currency.code;
+
+      row.innerHTML = `
+        <img src="https://flagcdn.com/24x18/${currency.flag}.png" class="flag">
+        <span class="code">${currency.label}</span>
+        <input type="text" class="amount-input" id="amount-${currency.code}" oninput="convert('${currency.code}')">
+        <input type="number" class="rate-input" value="${rates[currency.code]}" step="0.01" onchange="updateRate('${currency.code}', this.value)">
+      `;
+
+      addDragEvents(row);
+      return row;
+    }
+
+    function renderRows() {
+      const container = document.getElementById("currencyContainer");
+      container.innerHTML = "";
+      currencies.forEach(currency => {
+        container.appendChild(createRow(currency));
+      });
+      saveCurrencyOrder();
+    }
+
+    function saveCurrencyOrder() {
+      const order = currencies.map(c => c.code);
+      localStorage.setItem("currencyOrder", JSON.stringify(order));
+    }
+
+    function loadCurrencies() {
+      const saved = localStorage.getItem("currencyOrder");
+      if (saved) {
+        const order = JSON.parse(saved);
+        const map = Object.fromEntries(DEFAULT_CURRENCIES.map(c => [c.code, c]));
+        return order.map(code => map[code]).filter(Boolean);
+      } else {
+        return [...DEFAULT_CURRENCIES];
+      }
+    }
+
+    function saveRates() {
+      localStorage.setItem("currencyRates", JSON.stringify(rates));
+    }
+
+    function loadRates() {
+      const saved = localStorage.getItem("currencyRates");
+      if (saved) {
+        return { ...DEFAULT_RATES, ...JSON.parse(saved) };
+      }
+      return { ...DEFAULT_RATES };
+    }
+
+    let draggedCode = null;
+
+    function addDragEvents(row) {
+      row.addEventListener("dragstart", () => {
+        draggedCode = row.dataset.code;
+        row.classList.add("dragging");
+      });
+
+      row.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        row.classList.add("drag-over");
+      });
+
+      row.addEventListener("dragleave", () => {
+        row.classList.remove("drag-over");
+      });
+
+      row.addEventListener("drop", () => {
+        row.classList.remove("drag-over");
+        const targetCode = row.dataset.code;
+        if (draggedCode && draggedCode !== targetCode) {
+          const draggedIndex = currencies.findIndex(c => c.code === draggedCode);
+          const targetIndex = currencies.findIndex(c => c.code === targetCode);
+          const moved = currencies.splice(draggedIndex, 1)[0];
+          currencies.splice(targetIndex, 0, moved);
+          renderRows();
+        }
+      });
+
+      row.addEventListener("dragend", () => {
+        draggedCode = null;
+        row.classList.remove("dragging");
+      });
+    }
+
+    renderRows();
+  </script>
+
+</body>
+</html>
